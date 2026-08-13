@@ -1,4 +1,4 @@
-"""FreeCAD workbench entry point for Transform Gizmo."""
+"""FreeCAD workbench entry point for Transform Handle."""
 
 from pathlib import Path
 
@@ -6,14 +6,14 @@ import FreeCADGui as Gui
 
 
 MODULE_DIR = Path(__file__).resolve().parent
-ICON = str(MODULE_DIR / "Resources" / "icons" / "transform-gizmo.svg")
+ICON = str(MODULE_DIR / "Resources" / "icons" / "transform-widget.svg")
 
 
-class MoveGizmoWorkbench(Workbench):
+class MoveWidgetWorkbench(Workbench):
     """A small, standalone direct-manipulation workbench."""
 
-    MenuText = "Transform Gizmo"
-    ToolTip = "Direct move, rotate and safe-scale gizmo"
+    MenuText = "Transform Handle"
+    ToolTip = "Direct move, rotate and safe-scale handle"
     Icon = ICON
 
     def Initialize(self):
@@ -23,11 +23,11 @@ class MoveGizmoWorkbench(Workbench):
             import commands
 
         commands.register()
-        self.appendToolbar("Transform Gizmo", commands.COMMANDS)
-        self.appendMenu("Transform Gizmo", commands.COMMANDS)
+        self.appendToolbar("Transform Handle", commands.COMMANDS)
+        self.appendMenu("Transform Handle", commands.COMMANDS)
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
 
 
-Gui.addWorkbench(MoveGizmoWorkbench())
+Gui.addWorkbench(MoveWidgetWorkbench())

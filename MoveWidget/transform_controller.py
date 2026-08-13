@@ -1,4 +1,4 @@
-"""Selection-aware transform session and Coin3D gizmo.
+"""Selection-aware transform session and Coin3D handle.
 
 The controller owns no document objects.  It only adds a temporary scene-graph
 node and writes native FreeCAD properties inside one document transaction.
@@ -48,7 +48,7 @@ class TargetResolver:
             seen.add(key)
             property_name = TargetResolver._property_for(obj)
             if not property_name:
-                App.Console.PrintWarning(f"Transform Gizmo: {obj.Label} has no writable placement or attachment offset.\n")
+                App.Console.PrintWarning(f"Transform Handle: {obj.Label} has no writable placement or attachment offset.\n")
                 continue
             scale_property = TargetResolver._scale_property(obj)
             result.append(
@@ -119,24 +119,24 @@ class TransformController:
         selection = Gui.Selection.getSelection()
         self._targets = TargetResolver.resolve(selection)
         if not self._targets:
-            App.Console.PrintWarning("Transform Gizmo: select an object, Body, Part, Link, or attached BIM object first.\n")
+            App.Console.PrintWarning("Transform Handle: select an object, Body, Part, Link, or attached BIM object first.\n")
             return
         self._document = self._targets[0].obj.Document
         if any(target.obj.Document != self._document for target in self._targets):
-            App.Console.PrintWarning("Transform Gizmo: selection must be in one document.\n")
+            App.Console.PrintWarning("Transform Handle: selection must be in one document.\n")
             self._targets = []
             return
-        self._document.openTransaction("Transform Gizmo")
-        self._add_gizmo(self._shared_center())
+        self._document.openTransaction("Transform Handle")
+        self._add_handle(self._shared_center())
         self.active = True
         self._changed = False
         self._scale_notice_shown = False
-        App.Console.PrintMessage("Transform Gizmo: drag handles, then use Apply or Cancel.\n")
+        App.Console.PrintMessage("Transform Handle: drag handles, then use Apply or Cancel.\n")
 
     def finish(self, commit: bool):
         if not self.active:
             return
-        self._remove_gizmo()
+        self._remove_handle()
         if commit:
             self._document.commitTransaction()
         else:
@@ -163,7 +163,7 @@ class TransformController:
         self._visual_scale = max(diagonal * 0.35, 10.0)
         return App.Vector((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2)
 
-    def _add_gizmo(self, center):
+    def _add_handle(self, center):
         self._root = coin.SoSeparator()
         position = coin.SoTranslation()
         position.translation.setValue(center.x, center.y, center.z)
@@ -246,7 +246,7 @@ class TransformController:
         ring.addChild(lines)
         return ring
 
-    def _remove_gizmo(self):
+    def _remove_handle(self):
         if self._root:
             Gui.activeDocument().activeView().getSceneGraph().removeChild(self._root)
         self._root = None
@@ -270,14 +270,14 @@ class TransformController:
             self._document.recompute()
             self._changed = True
         except Exception as error:
-            App.Console.PrintError(f"Transform Gizmo: transform failed: {error}\n")
+            App.Console.PrintError(f"Transform Handle: transform failed: {error}\n")
 
     def _apply_scale(self, target: Target, factors):
         if max(abs(value - 1.0) for value in factors) < EPSILON:
             return
         if not target.supports_scale:
             if not self._scale_notice_shown:
-                App.Console.PrintWarning("Transform Gizmo: scale skipped for placement-only/parametric objects; use a native dimension or Scale property.\n")
+                App.Console.PrintWarning("Transform Handle: scale skipped for placement-only/parametric objects; use a native dimension or Scale property.\n")
                 self._scale_notice_shown = True
             return
         name = TargetResolver._scale_property(target.obj)
@@ -290,7 +290,7 @@ class TransformController:
                 value = initial * factors[0]
             setattr(target.obj, name, value)
         except Exception as error:
-            App.Console.PrintWarning(f"Transform Gizmo: scale skipped for {target.label}: {error}\n")
+            App.Console.PrintWarning(f"Transform Handle: scale skipped for {target.label}: {error}\n")
 
 
 controller = TransformController()

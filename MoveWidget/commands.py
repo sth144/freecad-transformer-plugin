@@ -1,4 +1,4 @@
-"""GUI commands exposed by the Transform Gizmo workbench."""
+"""GUI commands exposed by the Transform Handle workbench."""
 
 from pathlib import Path
 
@@ -10,13 +10,13 @@ except ImportError:  # Loaded by FreeCAD from the workbench directory.
     from transform_controller import controller
 
 
-ICON = str(Path(__file__).resolve().parent / "Resources" / "icons" / "transform-gizmo.svg")
-COMMANDS = ("MoveGizmo_Toggle", "MoveGizmo_Apply", "MoveGizmo_Cancel")
+ICON = str(Path(__file__).resolve().parent / "Resources" / "icons" / "transform-widget.svg")
+COMMANDS = ("MoveWidget_Toggle", "MoveWidget_Apply", "MoveWidget_Cancel")
 
 
 class _Toggle:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Toggle gizmo", "ToolTip": "Show or hide the transform gizmo for the selection"}
+        return {"Pixmap": ICON, "MenuText": "Toggle handle", "ToolTip": "Show or hide the transform handle for the selection"}
 
     def Activated(self):
         controller.toggle()
@@ -27,7 +27,7 @@ class _Toggle:
 
 class _Apply:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Apply transform", "ToolTip": "Commit the active gizmo transformation"}
+        return {"Pixmap": ICON, "MenuText": "Apply transform", "ToolTip": "Commit the active handle transformation"}
 
     def Activated(self):
         controller.finish(commit=True)
@@ -38,7 +38,7 @@ class _Apply:
 
 class _Cancel:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Cancel transform", "ToolTip": "Restore placements from before the gizmo drag"}
+        return {"Pixmap": ICON, "MenuText": "Cancel transform", "ToolTip": "Restore placements from before the handle drag"}
 
     def Activated(self):
         controller.finish(commit=False)
@@ -48,6 +48,6 @@ class _Cancel:
 
 
 def register():
-    Gui.addCommand("MoveGizmo_Toggle", _Toggle())
-    Gui.addCommand("MoveGizmo_Apply", _Apply())
-    Gui.addCommand("MoveGizmo_Cancel", _Cancel())
+    Gui.addCommand("MoveWidget_Toggle", _Toggle())
+    Gui.addCommand("MoveWidget_Apply", _Apply())
+    Gui.addCommand("MoveWidget_Cancel", _Cancel())

@@ -1,7 +1,7 @@
-# Transform Gizmo Workbench
+# Transform Handle Workbench
 
 An experimental FreeCAD workbench that brings a direct-manipulation transform
-gizmo to the 3D view. It uses Coin3D's `SoTransformBoxDragger` for interaction
+handle to the 3D view. It uses Coin3D's `SoTransformBoxDragger` for interaction
 and draws a Blender-inspired X/Y/Z arrow-and-rotation-ring handle at the pivot.
 
 ## Status
@@ -35,20 +35,20 @@ then restart FreeCAD:
 
 ```bash
 mkdir -p "$HOME/Library/Application Support/FreeCAD/Mod"
-ln -s /usr/local/src/freecad-transformer-plugin/MoveGizmo \
-  "$HOME/Library/Application Support/FreeCAD/Mod/MoveGizmo"
+ln -s /usr/local/src/freecad-transformer-plugin/MoveWidget \
+  "$HOME/Library/Application Support/FreeCAD/Mod/MoveWidget"
 ```
 
-Select **Transform Gizmo** from the workbench selector. Select objects and
-choose **Toggle gizmo**. Use **Apply** to retain changes or **Cancel** to
+Select **Transform Handle** from the workbench selector. Select objects and
+choose **Toggle handle**. Use **Apply** to retain changes or **Cancel** to
 restore the exact pre-drag state.
 
 ## Architecture
 
-`MoveGizmo/transform_controller.py` separates selection-to-target resolution
+`MoveWidget/transform_controller.py` separates selection-to-target resolution
 from viewport interaction. That makes it practical to add adapters for BIM
 objects, assemblies, and additional parametric types without touching the
-Coin3D gizmo code.
+Coin3D handle code.
 
 ## License
 

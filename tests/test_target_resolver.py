@@ -4,12 +4,12 @@ import unittest
 
 import FreeCAD as App
 
-from MoveGizmo.transform_controller import TargetResolver
+from MoveWidget.transform_controller import TargetResolver
 
 
 class TargetResolverTests(unittest.TestCase):
     def setUp(self):
-        self.doc = App.newDocument("MoveGizmoTest")
+        self.doc = App.newDocument("MoveWidgetTest")
 
     def tearDown(self):
         App.closeDocument(self.doc.Name)
