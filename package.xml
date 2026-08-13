@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<package>
+  <name>Transform Gizmo Workbench</name>
+  <description>Direct move, rotate and safe-scale gizmo for FreeCAD objects and BIM containers.</description>
+  <version>0.1.0</version>
+  <date>2026-08-13</date>
+  <maintainer email="">Local development</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+  <url type="readme">README.md</url>
+  <content>
+    <workbench>
+      <name>Transform Gizmo</name>
+      <classname>MoveGizmoWorkbench</classname>
+      <subdirectory>MoveGizmo</subdirectory>
+      <icon>MoveGizmo/Resources/icons/transform-gizmo.svg</icon>
+    </workbench>
+  </content>
+</package>
