@@ -5,7 +5,12 @@ from pathlib import Path
 import FreeCADGui as Gui
 
 
-MODULE_DIR = Path(__file__).resolve().parent
+try:
+    MODULE_DIR = Path(__file__).resolve().parent
+except NameError:  # FreeCAD execs InitGui.py without setting __file__.
+    import inspect
+
+    MODULE_DIR = Path(inspect.getfile(inspect.currentframe())).resolve().parent
 ICON = str(MODULE_DIR / "Resources" / "icons" / "transform-widget.svg")
 
 
