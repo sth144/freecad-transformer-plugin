@@ -22,49 +22,61 @@ INITGUI = os.path.join(
 
 class InitGuiContractTests(unittest.TestCase):
     def _exec_initgui(self):
-        """Exec InitGui.py the way FreeCAD does, capturing what it registers."""
+        """Exec InitGui.py the way FreeCAD does, capturing what it registers.
+
+        Returns (workbench, command_names_registered_at_startup).
+        """
         with open(INITGUI) as handle:
             source = handle.read()
 
-        registered = []
-        original = FreeCADGui.addWorkbench
+        registered, commands = [], []
+        original_wb = FreeCADGui.addWorkbench
+        original_cmd = FreeCADGui.addCommand
         FreeCADGui.addWorkbench = registered.append
+        FreeCADGui.addCommand = lambda name, obj: commands.append(name)
         try:
             # No __file__, no __name__, and globals is not locals.
             exec(compile(source, INITGUI, "exec"), {"Workbench": FreeCADGui.Workbench}, {})
         finally:
-            FreeCADGui.addWorkbench = original
+            FreeCADGui.addWorkbench = original_wb
+            FreeCADGui.addCommand = original_cmd
 
         self.assertEqual(len(registered), 1)
-        return registered[0]
+        return registered[0], commands
 
     def test_registers_workbench_without_dunder_file_or_name(self):
-        workbench = self._exec_initgui()
+        workbench, _ = self._exec_initgui()
         self.assertEqual(workbench.MenuText, "Transform Handle")
 
     def test_icon_resolves_to_an_existing_file(self):
         # Icon is bound after the class statement precisely because a class
         # body cannot read module-level names under FreeCAD's split namespace.
-        workbench = self._exec_initgui()
+        workbench, _ = self._exec_initgui()
         self.assertTrue(os.path.isfile(workbench.Icon), workbench.Icon)
 
-    def test_initialize_imports_commands_without_a_package_context(self):
-        workbench = self._exec_initgui()
-
-        added = []
-        original = FreeCADGui.addCommand
-        FreeCADGui.addCommand = lambda name, obj: added.append(name)
-        workbench.appendToolbar = lambda *args, **kwargs: None
-        workbench.appendMenu = lambda *args, **kwargs: None
-        try:
-            # The relative import raises KeyError, not ImportError, when
-            # __name__ is absent; the fallback has to catch both.
-            workbench.Initialize()
-        finally:
-            FreeCADGui.addCommand = original
-
+    def test_commands_are_registered_at_startup_not_on_activation(self):
+        # This is what makes the commands reachable from every workbench: they
+        # must exist after the exec alone, without Initialize() ever running.
+        _, commands = self._exec_initgui()
         self.assertEqual(
-            added,
+            commands,
+            ["MoveWidget_Toggle", "MoveWidget_Apply", "MoveWidget_Cancel"],
+        )
+
+    def test_initialize_surfaces_commands_without_a_package_context(self):
+        workbench, _ = self._exec_initgui()
+
+        toolbars, menus = [], []
+        workbench.appendToolbar = lambda name, cmds: toolbars.append((name, cmds))
+        workbench.appendMenu = lambda name, cmds: menus.append((name, cmds))
+        # The relative import raises KeyError, not ImportError, when __name__
+        # is absent; the fallback has to catch both.
+        workbench.Initialize()
+
+        self.assertEqual(len(toolbars), 1)
+        self.assertEqual(len(menus), 1)
+        self.assertEqual(
+            list(toolbars[0][1]),
             ["MoveWidget_Toggle", "MoveWidget_Apply", "MoveWidget_Cancel"],
         )
 

@@ -1,30 +1,51 @@
-"""FreeCAD workbench entry point for Transform Handle.
+"""FreeCAD entry point for Transform Handle.
 
-FreeCAD execs this file in a bare namespace rather than importing it: there is
-no ``__file__``, no ``__name__``, and globals/locals are separate dicts, so a
-class body cannot see module-level assignments. Everything this file needs is
-therefore resolved inside a function or bound after the class statement.
+The commands are registered here, at startup, rather than inside the
+workbench's ``Initialize()``. That makes them available from every workbench:
+bind one to a shortcut under Tools > Customize > Keyboard, or drop it on a
+custom toolbar, and moving an object no longer costs a workbench switch. The
+workbench itself remains only so the addon is discoverable.
+
+FreeCAD does not import this file, it execs it in a bare namespace: no
+``__file__``, no ``__name__``, and globals is not locals. Module-level names
+therefore live somewhere a class body or a function body cannot reach, which
+means top-level functions cannot even call each other. Hence the single
+self-contained ``_bootstrap`` below, called at module level.
 """
 
 import FreeCADGui as Gui
 
 
-def _icon_path():
-    """Absolute path to the workbench icon, without relying on ``__file__``."""
+def _bootstrap():
+    """Register the commands and return the workbench icon path."""
     import inspect
+    import sys
     from pathlib import Path
 
     try:
         here = __file__
     except NameError:
         here = inspect.getfile(inspect.currentframe())
-
     directory = Path(here).resolve().parent
+
+    # FreeCAD normally puts this directory on sys.path before running us, but
+    # do not depend on that ordering for the startup import.
+    if str(directory) not in sys.path:
+        sys.path.append(str(directory))
+
+    try:
+        from . import commands
+    except (ImportError, KeyError):
+        # Without __name__ in globals the relative import raises KeyError,
+        # not ImportError, so the fallback has to catch both.
+        import commands
+
+    commands.register()
     return str(directory / "Resources" / "icons" / "transform-widget.svg")
 
 
 class MoveWidgetWorkbench(Workbench):
-    """A small, standalone direct-manipulation workbench."""
+    """Discoverability shell: the commands work without ever activating it."""
 
     MenuText = "Transform Handle"
     ToolTip = "Direct move, rotate and safe-scale handle"
@@ -33,12 +54,9 @@ class MoveWidgetWorkbench(Workbench):
         try:
             from . import commands
         except (ImportError, KeyError):
-            # Without __name__ in globals the relative import raises KeyError,
-            # not ImportError. FreeCAD puts this directory on sys.path, so the
-            # flat import resolves.
             import commands
 
-        commands.register()
+        # Already registered at startup; only surface them here.
         self.appendToolbar("Transform Handle", commands.COMMANDS)
         self.appendMenu("Transform Handle", commands.COMMANDS)
 
@@ -46,5 +64,5 @@ class MoveWidgetWorkbench(Workbench):
         return "Gui::PythonWorkbench"
 
 
-MoveWidgetWorkbench.Icon = _icon_path()
+MoveWidgetWorkbench.Icon = _bootstrap()
 Gui.addWorkbench(MoveWidgetWorkbench())
