@@ -1,17 +1,26 @@
-"""FreeCAD workbench entry point for Transform Handle."""
+"""FreeCAD workbench entry point for Transform Handle.
 
-from pathlib import Path
+FreeCAD execs this file in a bare namespace rather than importing it: there is
+no ``__file__``, no ``__name__``, and globals/locals are separate dicts, so a
+class body cannot see module-level assignments. Everything this file needs is
+therefore resolved inside a function or bound after the class statement.
+"""
 
 import FreeCADGui as Gui
 
 
-try:
-    MODULE_DIR = Path(__file__).resolve().parent
-except NameError:  # FreeCAD execs InitGui.py without setting __file__.
+def _icon_path():
+    """Absolute path to the workbench icon, without relying on ``__file__``."""
     import inspect
+    from pathlib import Path
 
-    MODULE_DIR = Path(inspect.getfile(inspect.currentframe())).resolve().parent
-ICON = str(MODULE_DIR / "Resources" / "icons" / "transform-widget.svg")
+    try:
+        here = __file__
+    except NameError:
+        here = inspect.getfile(inspect.currentframe())
+
+    directory = Path(here).resolve().parent
+    return str(directory / "Resources" / "icons" / "transform-widget.svg")
 
 
 class MoveWidgetWorkbench(Workbench):
@@ -19,12 +28,14 @@ class MoveWidgetWorkbench(Workbench):
 
     MenuText = "Transform Handle"
     ToolTip = "Direct move, rotate and safe-scale handle"
-    Icon = ICON
 
     def Initialize(self):
         try:
             from . import commands
-        except ImportError:  # Loaded by FreeCAD as a top-level InitGui module.
+        except (ImportError, KeyError):
+            # Without __name__ in globals the relative import raises KeyError,
+            # not ImportError. FreeCAD puts this directory on sys.path, so the
+            # flat import resolves.
             import commands
 
         commands.register()
@@ -35,4 +46,5 @@ class MoveWidgetWorkbench(Workbench):
         return "Gui::PythonWorkbench"
 
 
+MoveWidgetWorkbench.Icon = _icon_path()
 Gui.addWorkbench(MoveWidgetWorkbench())
