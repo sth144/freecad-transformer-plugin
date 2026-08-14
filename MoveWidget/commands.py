@@ -11,12 +11,17 @@ except ImportError:  # Loaded by FreeCAD from the workbench directory.
 
 
 ICON = str(Path(__file__).resolve().parent / "Resources" / "icons" / "transform-widget.svg")
-COMMANDS = ("MoveWidget_Toggle", "MoveWidget_Apply", "MoveWidget_Cancel")
+# A list, not a tuple: Workbench.appendToolbar rejects tuples.
+COMMANDS = ["MoveWidget_Toggle", "MoveWidget_Apply", "MoveWidget_Cancel"]
+
+# Groups the commands in Tools > Customize, which is how they are found
+# without a workbench toolbar.
+GROUP = "Transform Handle"
 
 
 class _Toggle:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Toggle handle", "ToolTip": "Show or hide the transform handle for the selection"}
+        return {"Pixmap": ICON, "GroupName": GROUP, "MenuText": "Toggle handle", "ToolTip": "Show or hide the transform handle for the selection"}
 
     def Activated(self):
         controller.toggle()
@@ -27,7 +32,7 @@ class _Toggle:
 
 class _Apply:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Apply transform", "ToolTip": "Commit the active handle transformation"}
+        return {"Pixmap": ICON, "GroupName": GROUP, "MenuText": "Apply transform", "ToolTip": "Commit the active handle transformation"}
 
     def Activated(self):
         controller.finish(commit=True)
@@ -38,7 +43,7 @@ class _Apply:
 
 class _Cancel:
     def GetResources(self):
-        return {"Pixmap": ICON, "MenuText": "Cancel transform", "ToolTip": "Restore placements from before the handle drag"}
+        return {"Pixmap": ICON, "GroupName": GROUP, "MenuText": "Cancel transform", "ToolTip": "Restore placements from before the handle drag"}
 
     def Activated(self):
         controller.finish(commit=False)

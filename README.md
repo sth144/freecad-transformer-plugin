@@ -39,9 +39,23 @@ ln -s /usr/local/src/freecad-transformer-plugin/MoveWidget \
   "$HOME/Library/Application Support/FreeCAD/Mod/MoveWidget"
 ```
 
-Select **Transform Handle** from the workbench selector. Select objects and
-choose **Toggle handle**. Use **Apply** to retain changes or **Cancel** to
-restore the exact pre-drag state.
+## Usage
+
+This addon registers commands rather than a workbench, so the handle is
+available from whichever workbench you are already modelling in. Transforming
+an object should not cost you the PartDesign or BIM toolbars you were just
+using.
+
+After restarting, bind the commands under **Tools → Customize**; they are
+grouped there under *Transform Handle*.
+
+* **Keyboard** tab — assign a shortcut to *Toggle handle*. This is the
+  Blender-like flow: select, press the key, drag.
+* **Toolbars** tab — add the three commands to a custom toolbar, which stays
+  visible across workbenches.
+
+Then select objects and run **Toggle handle**. Use **Apply** to retain changes
+or **Cancel** to restore the exact pre-drag state.
 
 ## Architecture
 

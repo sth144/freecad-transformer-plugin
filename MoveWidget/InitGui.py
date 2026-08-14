@@ -1,23 +1,22 @@
 """FreeCAD entry point for Transform Handle.
 
-The commands are registered here, at startup, rather than inside the
-workbench's ``Initialize()``. That makes them available from every workbench:
-bind one to a shortcut under Tools > Customize > Keyboard, or drop it on a
-custom toolbar, and moving an object no longer costs a workbench switch. The
-workbench itself remains only so the addon is discoverable.
+This addon registers commands, not a workbench. Transforming an object is
+something you do *while* modelling, so putting the handle behind a workbench
+switch would cost you the PartDesign or BIM toolbars you were just using.
+Registering at startup instead makes the commands available everywhere: bind
+one to a shortcut under Tools > Customize > Keyboard, or drop them on a custom
+toolbar. They are grouped there under "Transform Handle".
 
 FreeCAD does not import this file, it execs it in a bare namespace: no
 ``__file__``, no ``__name__``, and globals is not locals. Module-level names
-therefore live somewhere a class body or a function body cannot reach, which
-means top-level functions cannot even call each other. Hence the single
-self-contained ``_bootstrap`` below, called at module level.
+therefore live somewhere a function body cannot reach, which means top-level
+functions cannot even call each other. Hence the single self-contained
+``_bootstrap`` below, called at module level.
 """
-
-import FreeCADGui as Gui
 
 
 def _bootstrap():
-    """Register the commands and return the workbench icon path."""
+    """Put this directory on sys.path and register the commands."""
     import inspect
     import sys
     from pathlib import Path
@@ -41,28 +40,6 @@ def _bootstrap():
         import commands
 
     commands.register()
-    return str(directory / "Resources" / "icons" / "transform-widget.svg")
 
 
-class MoveWidgetWorkbench(Workbench):
-    """Discoverability shell: the commands work without ever activating it."""
-
-    MenuText = "Transform Handle"
-    ToolTip = "Direct move, rotate and safe-scale handle"
-
-    def Initialize(self):
-        try:
-            from . import commands
-        except (ImportError, KeyError):
-            import commands
-
-        # Already registered at startup; only surface them here.
-        self.appendToolbar("Transform Handle", commands.COMMANDS)
-        self.appendMenu("Transform Handle", commands.COMMANDS)
-
-    def GetClassName(self):
-        return "Gui::PythonWorkbench"
-
-
-MoveWidgetWorkbench.Icon = _bootstrap()
-Gui.addWorkbench(MoveWidgetWorkbench())
+_bootstrap()

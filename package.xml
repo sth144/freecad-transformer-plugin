@@ -8,11 +8,11 @@
   <license file="LICENSE">LGPL-2.1-or-later</license>
   <url type="readme">README.md</url>
   <content>
-    <workbench>
+    <other>
       <name>Transform Handle</name>
-      <classname>MoveWidgetWorkbench</classname>
+      <description>Registers commands at startup; no workbench to switch to.</description>
       <subdirectory>MoveWidget</subdirectory>
       <icon>MoveWidget/Resources/icons/transform-widget.svg</icon>
-    </workbench>
+    </other>
   </content>
 </package>
