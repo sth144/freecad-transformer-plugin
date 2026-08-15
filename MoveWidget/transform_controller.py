@@ -107,6 +107,7 @@ class TransformController:
         self._targets: list[Target] = []
         self._root = None
         self._dragger = None
+        self._view = None
         self._timer = None
         self._last_sample = None
         self._document = None
@@ -173,6 +174,11 @@ class TransformController:
 
     def _add_handle(self, center):
         self._root = coin.SoSeparator()
+        # Coin nodes start at refcount 0, so addChild would take this to 1 and
+        # removeChild straight back to 0 -- destroying the node while Python
+        # still holds wrappers to it and its children, which segfaults inside
+        # the destructor chain. Hold our own reference and drop it explicitly.
+        self._root.ref()
         position = coin.SoTranslation()
         position.translation.setValue(center.x, center.y, center.z)
         scale = coin.SoScale()
@@ -189,7 +195,10 @@ class TransformController:
         self._root.addChild(scale)
         self._root.addChild(self._blender_style_handle())
         self._root.addChild(self._dragger)
-        Gui.activeDocument().activeView().getSceneGraph().addChild(self._root)
+        # Remember the view we attached to. Re-querying activeView() at
+        # teardown would target whatever document is in front by then.
+        self._view = Gui.activeDocument().activeView()
+        self._view.getSceneGraph().addChild(self._root)
 
     @staticmethod
     def _blender_style_handle():
@@ -280,12 +289,17 @@ class TransformController:
 
     def _remove_handle(self):
         self._stop_polling()
-        if self._root:
-            Gui.activeDocument().activeView().getSceneGraph().removeChild(self._root)
-        self._root = None
+        root, self._root = self._root, None
+        view, self._view = self._view, None
+        # Drop the Python wrappers before the nodes die, so nothing here
+        # references freed memory once the refcount reaches zero.
         self._dragger = None
-        self._timer = None
         self._last_sample = None
+        if root is None:
+            return
+        if view is not None:
+            view.getSceneGraph().removeChild(root)
+        root.unref()
 
     def _on_changed(self):
         if not self.active or self._dragger is None:
