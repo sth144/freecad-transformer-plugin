@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import FreeCAD as App
 import FreeCADGui as Gui
 
 try:
@@ -52,36 +53,77 @@ def register():
     Gui.addCommand("MoveWidget_Toggle", _Toggle())
     Gui.addCommand("MoveWidget_Apply", _Apply())
     Gui.addCommand("MoveWidget_Cancel", _Cancel())
-    _claim_actions()
+    _install_shortcut_actions()
 
 
-# FreeCAD creates a command's QAction lazily, after InitGui.py has run, so
-# the first attempt to claim them usually finds nothing. Retry for a while.
-CLAIM_ATTEMPTS = 20
-CLAIM_INTERVAL_MS = 500
+RETRY_INTERVAL_MS = 500
+RETRY_ATTEMPTS = 20
+
+# Where Tools > Customize > Keyboard saves user-assigned shortcuts.
+SHORTCUT_PARAMS = App.ParamGet("User parameter:BaseApp/Preferences/Shortcut")
+
+# Keeps our QActions alive for the life of the session.
+_SHORTCUT_ACTIONS = []
+_INSTALLED = set()
 
 
-def _claim_actions(attempt=0):
-    """Give each command's QAction an owning widget.
+def _install_shortcut_actions(attempt=0):
+    """Create main-window-owned QActions so assigned shortcuts actually fire.
 
-    Qt only activates a WindowShortcut when some widget owns the QAction. A
-    workbench normally supplies that owner by putting the command in a menu
-    or toolbar; this addon has no workbench, so without an explicit owner any
-    shortcut the user assigns is accepted by the Customize dialog and then
-    silently never fires. Hand the actions to the main window instead.
+    Qt only activates a WindowShortcut when a widget owns the QAction, and a
+    workbench is what normally supplies that owner by putting a command in a
+    menu or toolbar. With no workbench, FreeCAD never creates a QAction for
+    these commands at all, so there is nothing to give an owner to and any
+    shortcut assigned in Customize is silently dead.
+
+    So build our own actions, mirroring whatever shortcut the user configured,
+    and let the main window own them. FreeCAD's own action, if something later
+    creates one, stays ownerless and therefore inert -- no ambiguity. The
+    exception is putting these commands on a toolbar, which would activate
+    FreeCAD's action too and make the shortcut ambiguous.
     """
     main_window = Gui.getMainWindow()
-    claimed = 0
-    if main_window is not None:
-        for name in COMMANDS:
-            command = Gui.Command.get(name)
-            for action in (command.getAction() if command else None) or []:
-                if main_window not in action.associatedWidgets():
-                    main_window.addAction(action)
-                claimed += 1
+    if main_window is None:
+        # register() runs from InitGui.py, which can be before the main window
+        # exists. Retry until it does.
+        if attempt < RETRY_ATTEMPTS:
+            _defer(lambda: _install_shortcut_actions(attempt + 1), RETRY_INTERVAL_MS)
+        return
 
-    if claimed < len(COMMANDS) and attempt < CLAIM_ATTEMPTS:
-        _defer(lambda: _claim_actions(attempt + 1), CLAIM_INTERVAL_MS)
+    try:
+        from PySide6 import QtWidgets, QtGui
+    except ImportError:
+        from PySide2 import QtWidgets, QtGui
+    action_type = getattr(QtWidgets, "QAction", None) or QtGui.QAction
+
+    for name in COMMANDS:
+        if name in _INSTALLED:
+            # Installing twice would leave two actions on the same shortcut,
+            # which Qt treats as ambiguous and refuses to fire.
+            continue
+        command = Gui.Command.get(name)
+        if command is None:
+            continue
+        # Command.getShortcut() reads the QAction, which does not exist here,
+        # so it always returns "". Read what Customize actually saved instead.
+        shortcut = SHORTCUT_PARAMS.GetString(name, "")
+        if not shortcut:
+            # Nothing bound in Customize; no action needed.
+            continue
+        info = command.getInfo() or {}
+        action = action_type(info.get("menuText", name), main_window)
+        action.setObjectName("MoveWidgetShortcut_%s" % name)
+        action.setShortcut(shortcut)
+        action.triggered.connect(_runner(name))
+        main_window.addAction(action)
+        _SHORTCUT_ACTIONS.append(action)
+        _INSTALLED.add(name)
+
+
+def _runner(name):
+    def run():
+        Gui.runCommand(name, 0)
+    return run
 
 
 def _defer(callback, delay_ms):
