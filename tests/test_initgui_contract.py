@@ -39,13 +39,6 @@ class InitGuiContractTests(unittest.TestCase):
     def test_registers_commands_without_dunder_file_or_name(self):
         self.assertEqual([name for name, _ in self._exec_initgui()], EXPECTED)
 
-    def test_commands_declare_a_group_so_customize_can_find_them(self):
-        # Without a workbench toolbar, Tools > Customize is the only way in,
-        # and it groups by GroupName.
-        for name, command in self._exec_initgui():
-            resources = command.GetResources()
-            self.assertEqual(resources.get("GroupName"), "Transform Handle", name)
-
     def test_command_icons_resolve_to_an_existing_file(self):
         for name, command in self._exec_initgui():
             icon = command.GetResources()["Pixmap"]

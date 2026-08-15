@@ -46,8 +46,10 @@ available from whichever workbench you are already modelling in. Transforming
 an object should not cost you the PartDesign or BIM toolbars you were just
 using.
 
-After restarting, bind the commands under **Tools → Customize**; they are
-grouped there under *Transform Handle*.
+After restarting, bind the commands under **Tools → Customize**. They appear
+under the category **MoveWidget** — for Python commands FreeCAD takes that
+label from the `Mod` directory name, not from anything the addon declares, so
+a `GroupName` resource has no effect.
 
 * **Keyboard** tab — assign a shortcut to *Toggle handle*. This is the
   Blender-like flow: select, press the key, drag.
