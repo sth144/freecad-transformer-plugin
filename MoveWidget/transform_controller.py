@@ -111,7 +111,11 @@ class TransformController:
         self._root = None
         self._translators = []
         self._rotators = []
-        self._view = None
+        self._nodes = []
+        self._attached = set()
+        self._switch = None
+        self._position = None
+        self._scale = None
         self._timer = None
         self._last_sample = None
         self._document = None
@@ -137,7 +141,7 @@ class TransformController:
             self._targets = []
             return
         self._document.openTransaction("Transform Handle")
-        self._add_handle(self._shared_center())
+        self._show_handle(self._shared_center())
         self.active = True
         self._changed = False
         self._scale_notice_shown = False
@@ -146,7 +150,7 @@ class TransformController:
     def finish(self, commit: bool):
         if not self.active:
             return
-        self._remove_handle()
+        self._hide_handle()
         if commit:
             # The drag no longer recomputes per motion event, so this is the
             # single recompute for the whole gesture.
@@ -183,39 +187,88 @@ class TransformController:
         ("z", (0.0, 0.0, 1.0), (0.20, 0.46, 0.95)),
     )
 
-    def _add_handle(self, center):
+    def _show_handle(self, center):
+        """Position the handle over the selection and reveal it.
+
+        The scene graph is built once and then shown and hidden. Every crash
+        during bring-up was in destruction -- a dragger's destructor, reached
+        when a Python wrapper was freed and pivy deleted the node underneath
+        the graph. Nothing is destroyed here, so that whole class of fault is
+        out of reach; the nodes simply outlive the session.
+        """
+        self._build_handle()
+        self._position.translation.setValue(center.x, center.y, center.z)
+        self._scale.scaleFactor.setValue(
+            self._visual_scale, self._visual_scale, self._visual_scale)
+        self._reset_draggers()
+        gui_document = Gui.activeDocument()
+        self._attach(gui_document.activeView(), gui_document.Document.Name)
+        self._switch.whichChild = 0
+        self._start_polling()
+
+    def _build_handle(self):
+        if self._root is not None:
+            return
         self._root = coin.SoSeparator()
-        # Coin nodes start at refcount 0, so addChild would take this to 1 and
-        # removeChild straight back to 0 -- destroying the node while Python
-        # still holds wrappers to it and its children, which segfaults inside
-        # the destructor chain. Hold our own reference and drop it explicitly.
+        # Held for the life of the session, so the refcount never reaches zero
+        # and no destructor ever runs while the graph is live.
         self._root.ref()
-        position = coin.SoTranslation()
-        position.translation.setValue(center.x, center.y, center.z)
-        scale = coin.SoScale()
-        scale.scaleFactor.setValue(self._visual_scale, self._visual_scale, self._visual_scale)
-        self._root.addChild(position)
-        self._root.addChild(scale)
+        self._switch = coin.SoSwitch()
+        self._switch.whichChild = -1
+        self._position = coin.SoTranslation()
+        self._scale = coin.SoScale()
+        body = coin.SoSeparator()
+        body.addChild(self._position)
+        body.addChild(self._scale)
 
         # One dragger per axis instead of a single SoTransformBoxDragger. This
         # is what constrains a drag to the arrow you actually grabbed, and it
         # makes the arrows and rings the handles rather than decoration drawn
         # alongside a separate, differently shaped dragger.
-        self._translators = []
-        self._rotators = []
         for _name, direction, colour in self.AXES:
-            self._root.addChild(self._axis_translator(direction, colour))
-            self._root.addChild(self._axis_rotator(direction, colour))
+            body.addChild(self._axis_translator(direction, colour))
+            body.addChild(self._axis_rotator(direction, colour))
 
-        # Deliberately no Coin dragger callbacks: Coin invokes them from its
-        # handleEvent traversal with no Python thread state current, so pivy's
-        # bridge dereferences a NULL tstate and segfaults inside PyDict_New.
-        # Poll from a Qt timer instead, which runs with the GIL properly held.
-        self._start_polling()
-        # Remember the view we attached to. Re-querying activeView() at
-        # teardown would target whatever document is in front by then.
-        self._view = Gui.activeDocument().activeView()
-        self._view.getSceneGraph().addChild(self._root)
+        self._switch.addChild(body)
+        self._root.addChild(self._switch)
+        # Keep a Python reference to everything: a wrapper being garbage
+        # collected is what deleted live nodes and segfaulted Coin.
+        self._nodes.extend([self._switch, self._position, self._scale, body])
+
+    def _attach(self, view, document_name):
+        """Attach the handle to this document's view, safely.
+
+        Views are tracked by document name and never by object. Calling
+        getSceneGraph() on the view of a closed document segfaults inside
+        SoBase::ref() -- a hard fault, not a Python exception, so it cannot be
+        caught. The only safe move is to never dereference a dead view, hence
+        pruning against the list of open documents first.
+        """
+        live = set(App.listDocuments())
+        self._attached &= live
+        if document_name in self._attached:
+            return
+        for other in list(self._attached):
+            # Still open, so its view is alive and safe to touch.
+            other_view = Gui.getDocument(other).ActiveView
+            other_view.getSceneGraph().removeChild(self._root)
+            self._attached.discard(other)
+        view.getSceneGraph().addChild(self._root)
+        self._attached.add(document_name)
+
+    def _reset_draggers(self):
+        identity = coin.SbRotation(coin.SbVec3f(0.0, 0.0, 1.0), 0.0)
+        for dragger, _direction in self._translators:
+            dragger.translation.setValue(0.0, 0.0, 0.0)
+        for dragger, _direction in self._rotators:
+            dragger.rotation.setValue(identity)
+        self._last_sample = None
+
+    def _hide_handle(self):
+        self._stop_polling()
+        if self._switch is not None:
+            self._switch.whichChild = -1
+        self._last_sample = None
 
     def _axis_translator(self, direction, colour):
         """An arrow whose drag is constrained to one axis."""
@@ -230,6 +283,7 @@ class TransformController:
         dragger.setPart("translatorActive", self._arrow(colour, True))
         group.addChild(dragger)
         self._translators.append((dragger, direction))
+        self._nodes.extend([group, orient, dragger])
         return group
 
     def _axis_rotator(self, direction, colour):
@@ -245,6 +299,7 @@ class TransformController:
         dragger.setPart("rotatorActive", self._ring(colour, True))
         group.addChild(dragger)
         self._rotators.append((dragger, direction))
+        self._nodes.extend([group, orient, dragger])
         return group
 
     @staticmethod
@@ -331,21 +386,6 @@ class TransformController:
             self._timer.stop()
             self._timer.timeout.disconnect(self._on_changed)
         self._timer = None
-
-    def _remove_handle(self):
-        self._stop_polling()
-        root, self._root = self._root, None
-        view, self._view = self._view, None
-        # Drop the Python wrappers before the nodes die, so nothing here
-        # references freed memory once the refcount reaches zero.
-        self._translators = []
-        self._rotators = []
-        self._last_sample = None
-        if root is None:
-            return
-        if view is not None:
-            view.getSceneGraph().removeChild(root)
-        root.unref()
 
     def _on_changed(self):
         if not self.active or not self._translators:
