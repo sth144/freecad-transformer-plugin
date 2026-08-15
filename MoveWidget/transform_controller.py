@@ -104,6 +104,7 @@ class TransformController:
         self._targets: list[Target] = []
         self._root = None
         self._dragger = None
+        self._changed_cb = None
         self._document = None
         self._visual_scale = 1.0
         self._changed = False
@@ -138,6 +139,9 @@ class TransformController:
             return
         self._remove_handle()
         if commit:
+            # The drag no longer recomputes per motion event, so this is the
+            # single recompute for the whole gesture.
+            self._document.recompute()
             self._document.commitTransaction()
         else:
             for target in self._targets:
@@ -170,7 +174,12 @@ class TransformController:
         scale = coin.SoScale()
         scale.scaleFactor.setValue(self._visual_scale, self._visual_scale, self._visual_scale)
         self._dragger = coin.SoTransformBoxDragger()
-        self._dragger.addValueChangedCallback(self._on_changed)
+        # Hold the bound method in an attribute. Attribute access builds a new
+        # bound-method object each time, and Coin stores only a raw pointer, so
+        # passing self._on_changed directly lets Python free the callback the
+        # moment this call returns -- the first drag event then segfaults.
+        self._changed_cb = self._on_changed
+        self._dragger.addValueChangedCallback(self._changed_cb)
         self._root.addChild(position)
         self._root.addChild(scale)
         self._root.addChild(self._blender_style_handle())
@@ -247,10 +256,13 @@ class TransformController:
         return ring
 
     def _remove_handle(self):
+        if self._dragger is not None and self._changed_cb is not None:
+            self._dragger.removeValueChangedCallback(self._changed_cb)
         if self._root:
             Gui.activeDocument().activeView().getSceneGraph().removeChild(self._root)
         self._root = None
         self._dragger = None
+        self._changed_cb = None
 
     def _on_changed(self, _dragger, _data=None):
         if not self.active:
@@ -267,7 +279,11 @@ class TransformController:
                 else:
                     setattr(target.obj, target.property_name, delta.multiply(target.initial))
                 self._apply_scale(target, (sx, sy, sz))
-            self._document.recompute()
+            # Deliberately no recompute here. This runs on every mouse-move
+            # event, from inside Coin's handleEvent traversal; recomputing a
+            # whole document mid-traversal is both very slow on large models
+            # and a good way to invalidate nodes Coin is still walking.
+            # Placement changes redraw on their own; finish() recomputes once.
             self._changed = True
         except Exception as error:
             App.Console.PrintError(f"Transform Handle: transform failed: {error}\n")
