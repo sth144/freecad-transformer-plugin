@@ -107,6 +107,7 @@ class TransformController:
         self._targets: list[Target] = []
         self._root = None
         self._dragger = None
+        self._handle_transform = None
         self._view = None
         self._timer = None
         self._last_sample = None
@@ -193,7 +194,15 @@ class TransformController:
         self._start_polling()
         self._root.addChild(position)
         self._root.addChild(scale)
-        self._root.addChild(self._blender_style_handle())
+        # The arrows and rings are siblings of the dragger, so the dragger's
+        # motion does not reach them; drive them from a transform of our own,
+        # updated on each poll. Wrapped in a separator so that transform does
+        # not leak onto the dragger that follows it.
+        decoration = coin.SoSeparator()
+        self._handle_transform = coin.SoTransform()
+        decoration.addChild(self._handle_transform)
+        decoration.addChild(self._blender_style_handle())
+        self._root.addChild(decoration)
         self._root.addChild(self._dragger)
         # Remember the view we attached to. Re-querying activeView() at
         # teardown would target whatever document is in front by then.
@@ -294,6 +303,7 @@ class TransformController:
         # Drop the Python wrappers before the nodes die, so nothing here
         # references freed memory once the refcount reaches zero.
         self._dragger = None
+        self._handle_transform = None
         self._last_sample = None
         if root is None:
             return
@@ -314,6 +324,10 @@ class TransformController:
                 # actually moved the dragger.
                 return
             self._last_sample = sample
+            # Keep the arrows and rings on the object. Scale is deliberately
+            # not mirrored: the affordance should stay a constant size.
+            self._handle_transform.translation.setValue(tx, ty, tz)
+            self._handle_transform.rotation.setValue(qx, qy, qz, qw)
             delta = App.Placement(App.Vector(tx, ty, tz) * self._visual_scale, App.Rotation(qx, qy, qz, qw))
             for target in self._targets:
                 # Attachment offsets are intentionally composed in attachment-local space.
