@@ -1,8 +1,14 @@
-# Transform Handle Workbench
+# Transform Handle
 
-An experimental FreeCAD workbench that brings a direct-manipulation transform
-handle to the 3D view. It uses Coin3D's `SoTransformBoxDragger` for interaction
-and draws a Blender-inspired X/Y/Z arrow-and-rotation-ring handle at the pivot.
+An experimental FreeCAD addon that brings a direct-manipulation transform
+handle to the 3D view: a Blender-inspired X/Y/Z arrow-and-ring gizmo at the
+pivot, where each arrow and ring is its own Coin3D dragger, so a drag is
+constrained to the axis you grabbed.
+
+![Moving and rotating a gear with the transform handle](docs/transform-handle.gif)
+
+It registers commands rather than a workbench, so the handle is available from
+whichever workbench you are already modelling in.
 
 ## Status
 
