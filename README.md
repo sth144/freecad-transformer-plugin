@@ -18,10 +18,14 @@ This is a deliberately conservative first pass. It is intended for FreeCAD
   never edited.
 * Multi-selection: targets are deduplicated and transformed about one shared
   bounding-box centre.
-* Scaling: only objects exposing a writable `Scale`/`ScaleFactor` property are
-  scaled. Placement-only and parametric objects retain their valid placement
-  and report that scale is not representable. The workbench never bakes a
-  scale into a Shape or edits a feature's dimensions behind the user’s back.
+* Each arrow and ring is its own Coin dragger, so a drag is constrained to the
+  axis you grabbed: `SoTranslate1Dragger` per axis for the arrows,
+  `SoRotateDiscDragger` per axis for the rings.
+* Scaling is not currently reachable from the handle. It needs an
+  `SoScale1Dragger` per axis; `_apply_scale` is still there for that. The rule
+  it enforces stands: only objects exposing a writable `Scale`/`ScaleFactor`
+  can be scaled, and the addon never bakes a scale into a Shape or edits a
+  feature's dimensions behind the user's back.
 
 That last rule is important: transform matrices can represent scale, but a
 FreeCAD `Placement` cannot. A future version needs workbench-specific scale

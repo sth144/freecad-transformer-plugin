@@ -7,7 +7,7 @@ node and writes native FreeCAD properties inside one document transaction.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, pi, sin
+from math import cos, degrees, pi, sin
 from typing import Iterable
 
 import FreeCAD as App
@@ -19,6 +19,9 @@ EPSILON = 1.0e-8
 
 # How often to sample the dragger while a handle is up, in milliseconds.
 POLL_INTERVAL_MS = 40
+
+# Segments used to draw each rotation ring.
+RING_SEGMENTS = 48
 
 
 @dataclass
@@ -106,8 +109,8 @@ class TransformController:
         self.active = False
         self._targets: list[Target] = []
         self._root = None
-        self._dragger = None
-        self._handle_transform = None
+        self._translators = []
+        self._rotators = []
         self._view = None
         self._timer = None
         self._last_sample = None
@@ -173,6 +176,13 @@ class TransformController:
         self._visual_scale = max(diagonal * 0.35, 10.0)
         return App.Vector((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2)
 
+    # name, world axis, colour
+    AXES = (
+        ("x", (1.0, 0.0, 0.0), (0.95, 0.18, 0.22)),
+        ("y", (0.0, 1.0, 0.0), (0.32, 0.75, 0.18)),
+        ("z", (0.0, 0.0, 1.0), (0.20, 0.46, 0.95)),
+    )
+
     def _add_handle(self, center):
         self._root = coin.SoSeparator()
         # Coin nodes start at refcount 0, so addChild would take this to 1 and
@@ -184,99 +194,125 @@ class TransformController:
         position.translation.setValue(center.x, center.y, center.z)
         scale = coin.SoScale()
         scale.scaleFactor.setValue(self._visual_scale, self._visual_scale, self._visual_scale)
-        self._dragger = coin.SoTransformBoxDragger()
-        # Deliberately no addValueChangedCallback here. Coin invokes dragger
-        # callbacks from its handleEvent traversal with no Python thread state
-        # current, so pivy's bridge dereferences a NULL tstate and segfaults
-        # inside PyDict_New. FreeCAD's own Std_TransformManip uses a C++
-        # dragger for the same reason. Poll from a Qt timer instead: that runs
-        # on the main thread with the GIL properly held.
-        self._start_polling()
         self._root.addChild(position)
         self._root.addChild(scale)
-        # The arrows and rings are siblings of the dragger, so the dragger's
-        # motion does not reach them; drive them from a transform of our own,
-        # updated on each poll. Wrapped in a separator so that transform does
-        # not leak onto the dragger that follows it.
-        decoration = coin.SoSeparator()
-        self._handle_transform = coin.SoTransform()
-        decoration.addChild(self._handle_transform)
-        decoration.addChild(self._blender_style_handle())
-        self._root.addChild(decoration)
-        self._root.addChild(self._dragger)
+
+        # One dragger per axis instead of a single SoTransformBoxDragger. This
+        # is what constrains a drag to the arrow you actually grabbed, and it
+        # makes the arrows and rings the handles rather than decoration drawn
+        # alongside a separate, differently shaped dragger.
+        self._translators = []
+        self._rotators = []
+        for _name, direction, colour in self.AXES:
+            self._root.addChild(self._axis_translator(direction, colour))
+            self._root.addChild(self._axis_rotator(direction, colour))
+
+        # Deliberately no Coin dragger callbacks: Coin invokes them from its
+        # handleEvent traversal with no Python thread state current, so pivy's
+        # bridge dereferences a NULL tstate and segfaults inside PyDict_New.
+        # Poll from a Qt timer instead, which runs with the GIL properly held.
+        self._start_polling()
         # Remember the view we attached to. Re-querying activeView() at
         # teardown would target whatever document is in front by then.
         self._view = Gui.activeDocument().activeView()
         self._view.getSceneGraph().addChild(self._root)
 
-    @staticmethod
-    def _blender_style_handle():
-        """Draw a familiar X/Y/Z arrow-and-ring affordance at unit size.
+    def _axis_translator(self, direction, colour):
+        """An arrow whose drag is constrained to one axis."""
+        group = coin.SoSeparator()
+        orient = coin.SoRotation()
+        # SoTranslate1Dragger translates along its own local X; aim that here.
+        orient.rotation.setValue(
+            coin.SbRotation(coin.SbVec3f(1.0, 0.0, 0.0), coin.SbVec3f(*direction)))
+        group.addChild(orient)
+        dragger = coin.SoTranslate1Dragger()
+        dragger.setPart("translator", self._arrow(colour, False))
+        dragger.setPart("translatorActive", self._arrow(colour, True))
+        group.addChild(dragger)
+        self._translators.append((dragger, direction))
+        return group
 
-        It is kept separate from the Coin dragger so replacing the interaction
-        implementation later does not require changing the visual language.
-        The parent scale makes it fit the selected objects.
-        """
-        handle = coin.SoSeparator()
-        handle.addChild(TransformController._axis((1, 0, 0), (0.95, 0.18, 0.22)))
-        handle.addChild(TransformController._axis((0, 1, 0), (0.32, 0.75, 0.18)))
-        handle.addChild(TransformController._axis((0, 0, 1), (0.20, 0.46, 0.95)))
-        handle.addChild(TransformController._ring("x", (0.95, 0.18, 0.22)))
-        handle.addChild(TransformController._ring("y", (0.32, 0.75, 0.18)))
-        handle.addChild(TransformController._ring("z", (0.20, 0.46, 0.95)))
-        return handle
+    def _axis_rotator(self, direction, colour):
+        """A ring whose drag is constrained to rotation about one axis."""
+        group = coin.SoSeparator()
+        orient = coin.SoRotation()
+        # SoRotateDiscDragger rotates about its own local Z; aim that here.
+        orient.rotation.setValue(
+            coin.SbRotation(coin.SbVec3f(0.0, 0.0, 1.0), coin.SbVec3f(*direction)))
+        group.addChild(orient)
+        dragger = coin.SoRotateDiscDragger()
+        dragger.setPart("rotator", self._ring(colour, False))
+        dragger.setPart("rotatorActive", self._ring(colour, True))
+        group.addChild(dragger)
+        self._rotators.append((dragger, direction))
+        return group
 
     @staticmethod
-    def _axis(direction, colour):
-        axis = coin.SoSeparator()
+    def _arrow(colour, active):
+        """A solid arrow along +X. Solid geometry is a reliable pick target."""
+        node = coin.SoSeparator()
         material = coin.SoMaterial()
         material.diffuseColor.setValue(*colour)
-        axis.addChild(material)
-        rotation = coin.SoRotation()
-        if direction == (1, 0, 0):
-            rotation.rotation.setValue(coin.SbVec3f(0, 0, 1), -pi / 2)
-        elif direction == (0, 0, 1):
-            rotation.rotation.setValue(coin.SbVec3f(1, 0, 0), pi / 2)
-        axis.addChild(rotation)
+        if active:
+            material.emissiveColor.setValue(*colour)
+        node.addChild(material)
+        orient = coin.SoRotation()
+        orient.rotation.setValue(
+            coin.SbRotation(coin.SbVec3f(0.0, 1.0, 0.0), coin.SbVec3f(1.0, 0.0, 0.0)))
+        node.addChild(orient)
+        shaft_offset = coin.SoTranslation()
+        shaft_offset.translation.setValue(0.0, 0.62, 0.0)
+        node.addChild(shaft_offset)
         shaft = coin.SoCylinder()
-        shaft.radius = 0.025
+        shaft.radius = 0.035
         shaft.height = 1.25
-        axis.addChild(shaft)
+        node.addChild(shaft)
         tip_offset = coin.SoTranslation()
-        tip_offset.translation.setValue(0, 0.82, 0)
-        axis.addChild(tip_offset)
+        tip_offset.translation.setValue(0.0, 0.78, 0.0)
+        node.addChild(tip_offset)
         tip = coin.SoCone()
-        tip.bottomRadius = 0.09
-        tip.height = 0.28
-        axis.addChild(tip)
-        return axis
+        tip.bottomRadius = 0.12
+        tip.height = 0.32
+        node.addChild(tip)
+        return node
 
     @staticmethod
-    def _ring(axis, colour):
-        ring = coin.SoSeparator()
-        material = coin.SoMaterial()
-        material.diffuseColor.setValue(*colour)
-        ring.addChild(material)
-        style = coin.SoDrawStyle()
-        style.lineWidth = 3.0
-        ring.addChild(style)
+    def _ring(colour, active):
+        """A flat annulus in the XY plane, drawn as a solid band.
+
+        The previous rings were a 3px line loop, which is both hard to see and
+        nearly impossible to click -- grabbing one fell through to whatever was
+        behind it. A band has real area to hit. BASE_COLOR keeps it evenly
+        visible from either side regardless of surface normals.
+        """
+        node = coin.SoSeparator()
+        light = coin.SoLightModel()
+        light.model = coin.SoLightModel.BASE_COLOR
+        node.addChild(light)
+        tint = [min(1.0, channel + 0.35) for channel in colour] if active else list(colour)
+        base = coin.SoBaseColor()
+        base.rgb.setValue(*tint)
+        node.addChild(base)
+        inner, outer = (0.90, 1.18) if active else (0.92, 1.16)
         points = []
-        for index in range(49):
-            angle = 2 * pi * index / 48
-            a, b = 0.52 * cos(angle), 0.52 * sin(angle)
-            if axis == "x":
-                points.append((0, a, b))
-            elif axis == "y":
-                points.append((a, 0, b))
-            else:
-                points.append((a, b, 0))
+        for index in range(RING_SEGMENTS + 1):
+            angle = 2 * pi * index / RING_SEGMENTS
+            cosine, sine = cos(angle), sin(angle)
+            points.append((outer * cosine, outer * sine, 0.0))
+            points.append((inner * cosine, inner * sine, 0.0))
         coordinates = coin.SoCoordinate3()
         coordinates.point.setValues(0, len(points), points)
-        ring.addChild(coordinates)
-        lines = coin.SoLineSet()
-        lines.numVertices = len(points)
-        ring.addChild(lines)
-        return ring
+        node.addChild(coordinates)
+        strip = coin.SoTriangleStripSet()
+        strip.numVertices.setValue(len(points))
+        node.addChild(strip)
+        return node
+
+    @staticmethod
+    def _disc_angle(dragger):
+        """Signed rotation of a disc dragger about its own local Z."""
+        axis, angle = dragger.rotation.getValue().getAxisAngle()
+        return angle if axis.getValue()[2] >= 0.0 else -angle
 
     def _start_polling(self):
         """Sample the dragger on a timer rather than via a Coin callback."""
@@ -302,8 +338,8 @@ class TransformController:
         view, self._view = self._view, None
         # Drop the Python wrappers before the nodes die, so nothing here
         # references freed memory once the refcount reaches zero.
-        self._dragger = None
-        self._handle_transform = None
+        self._translators = []
+        self._rotators = []
         self._last_sample = None
         if root is None:
             return
@@ -312,32 +348,41 @@ class TransformController:
         root.unref()
 
     def _on_changed(self):
-        if not self.active or self._dragger is None:
+        if not self.active or not self._translators:
             return
         try:
-            tx, ty, tz = self._dragger.translation.getValue().getValue()
-            qx, qy, qz, qw = self._dragger.rotation.getValue().getValue()
-            sx, sy, sz = self._dragger.scaleFactor.getValue().getValue()
-            sample = (tx, ty, tz, qx, qy, qz, qw, sx, sy, sz)
+            # Each translator reports distance along its own local X, and each
+            # rotator an angle about its own local Z; both were aimed at a
+            # world axis when built, so the components compose directly.
+            offsets = [dragger.translation.getValue().getValue()[0]
+                       for dragger, _direction in self._translators]
+            angles = [self._disc_angle(dragger)
+                      for dragger, _direction in self._rotators]
+            sample = tuple(round(value, 7) for value in offsets + angles)
             if sample == self._last_sample:
-                # Polling runs continuously; only write when the user has
-                # actually moved the dragger.
+                # Polling runs continuously; only write when something moved.
                 return
             self._last_sample = sample
-            # Keep the arrows and rings on the object. Scale is deliberately
-            # not mirrored: the affordance should stay a constant size.
-            self._handle_transform.translation.setValue(tx, ty, tz)
-            self._handle_transform.rotation.setValue(qx, qy, qz, qw)
-            delta = App.Placement(App.Vector(tx, ty, tz) * self._visual_scale, App.Rotation(qx, qy, qz, qw))
+
+            translation = App.Vector(0.0, 0.0, 0.0)
+            for offset, (_dragger, direction) in zip(offsets, self._translators):
+                translation = translation + App.Vector(*direction) * offset
+            rotation = App.Rotation()
+            for angle, (_dragger, direction) in zip(angles, self._rotators):
+                if abs(angle) > EPSILON:
+                    rotation = App.Rotation(App.Vector(*direction), degrees(angle)).multiply(rotation)
+
+            delta = App.Placement(translation * self._visual_scale, rotation)
             for target in self._targets:
                 # Attachment offsets are intentionally composed in attachment-local space.
                 if target.property_name == "AttachmentOffset":
                     setattr(target.obj, target.property_name, target.initial.multiply(delta))
                 else:
                     setattr(target.obj, target.property_name, delta.multiply(target.initial))
-                self._apply_scale(target, (sx, sy, sz))
-            # Deliberately no recompute here: it would run many times a second
-            # and is very slow on large models. finish() recomputes once.
+            # Scale is not reachable from this gizmo yet; it needs its own
+            # SoScale1Dragger per axis. _apply_scale stays for that.
+            # No recompute here either: it would run many times a second and is
+            # very slow on large models. finish() recomputes once.
             self._changed = True
         except Exception as error:
             App.Console.PrintError(f"Transform Handle: transform failed: {error}\n")
