@@ -17,6 +17,9 @@ from pivy import coin
 
 EPSILON = 1.0e-8
 
+# How often to sample the dragger while a handle is up, in milliseconds.
+POLL_INTERVAL_MS = 40
+
 
 @dataclass
 class Target:
@@ -104,7 +107,8 @@ class TransformController:
         self._targets: list[Target] = []
         self._root = None
         self._dragger = None
-        self._changed_cb = None
+        self._timer = None
+        self._last_sample = None
         self._document = None
         self._visual_scale = 1.0
         self._changed = False
@@ -174,12 +178,13 @@ class TransformController:
         scale = coin.SoScale()
         scale.scaleFactor.setValue(self._visual_scale, self._visual_scale, self._visual_scale)
         self._dragger = coin.SoTransformBoxDragger()
-        # Hold the bound method in an attribute. Attribute access builds a new
-        # bound-method object each time, and Coin stores only a raw pointer, so
-        # passing self._on_changed directly lets Python free the callback the
-        # moment this call returns -- the first drag event then segfaults.
-        self._changed_cb = self._on_changed
-        self._dragger.addValueChangedCallback(self._changed_cb)
+        # Deliberately no addValueChangedCallback here. Coin invokes dragger
+        # callbacks from its handleEvent traversal with no Python thread state
+        # current, so pivy's bridge dereferences a NULL tstate and segfaults
+        # inside PyDict_New. FreeCAD's own Std_TransformManip uses a C++
+        # dragger for the same reason. Poll from a Qt timer instead: that runs
+        # on the main thread with the GIL properly held.
+        self._start_polling()
         self._root.addChild(position)
         self._root.addChild(scale)
         self._root.addChild(self._blender_style_handle())
@@ -255,22 +260,46 @@ class TransformController:
         ring.addChild(lines)
         return ring
 
+    def _start_polling(self):
+        """Sample the dragger on a timer rather than via a Coin callback."""
+        try:
+            from PySide6 import QtCore
+        except ImportError:
+            from PySide2 import QtCore
+
+        self._timer = QtCore.QTimer()
+        self._timer.setInterval(POLL_INTERVAL_MS)
+        self._timer.timeout.connect(self._on_changed)
+        self._timer.start()
+
+    def _stop_polling(self):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer.timeout.disconnect(self._on_changed)
+        self._timer = None
+
     def _remove_handle(self):
-        if self._dragger is not None and self._changed_cb is not None:
-            self._dragger.removeValueChangedCallback(self._changed_cb)
+        self._stop_polling()
         if self._root:
             Gui.activeDocument().activeView().getSceneGraph().removeChild(self._root)
         self._root = None
         self._dragger = None
-        self._changed_cb = None
+        self._timer = None
+        self._last_sample = None
 
-    def _on_changed(self, _dragger, _data=None):
-        if not self.active:
+    def _on_changed(self):
+        if not self.active or self._dragger is None:
             return
         try:
             tx, ty, tz = self._dragger.translation.getValue().getValue()
             qx, qy, qz, qw = self._dragger.rotation.getValue().getValue()
             sx, sy, sz = self._dragger.scaleFactor.getValue().getValue()
+            sample = (tx, ty, tz, qx, qy, qz, qw, sx, sy, sz)
+            if sample == self._last_sample:
+                # Polling runs continuously; only write when the user has
+                # actually moved the dragger.
+                return
+            self._last_sample = sample
             delta = App.Placement(App.Vector(tx, ty, tz) * self._visual_scale, App.Rotation(qx, qy, qz, qw))
             for target in self._targets:
                 # Attachment offsets are intentionally composed in attachment-local space.
@@ -279,11 +308,8 @@ class TransformController:
                 else:
                     setattr(target.obj, target.property_name, delta.multiply(target.initial))
                 self._apply_scale(target, (sx, sy, sz))
-            # Deliberately no recompute here. This runs on every mouse-move
-            # event, from inside Coin's handleEvent traversal; recomputing a
-            # whole document mid-traversal is both very slow on large models
-            # and a good way to invalidate nodes Coin is still walking.
-            # Placement changes redraw on their own; finish() recomputes once.
+            # Deliberately no recompute here: it would run many times a second
+            # and is very slow on large models. finish() recomputes once.
             self._changed = True
         except Exception as error:
             App.Console.PrintError(f"Transform Handle: transform failed: {error}\n")
