@@ -111,6 +111,7 @@ class TransformController:
         self._root = None
         self._translators = []
         self._rotators = []
+        self._scalers = []
         self._nodes = []
         self._attached = set()
         self._switch = None
@@ -228,6 +229,7 @@ class TransformController:
         for _name, direction, colour in self.AXES:
             body.addChild(self._axis_translator(direction, colour))
             body.addChild(self._axis_rotator(direction, colour))
+            body.addChild(self._axis_scaler(direction, colour))
 
         self._switch.addChild(body)
         self._root.addChild(self._switch)
@@ -262,6 +264,8 @@ class TransformController:
             dragger.translation.setValue(0.0, 0.0, 0.0)
         for dragger, _direction in self._rotators:
             dragger.rotation.setValue(identity)
+        for dragger, _direction in self._scalers:
+            dragger.scaleFactor.setValue(1.0, 1.0, 1.0)
         self._last_sample = None
 
     def _hide_handle(self):
@@ -294,13 +298,55 @@ class TransformController:
         orient.rotation.setValue(
             coin.SbRotation(coin.SbVec3f(0.0, 0.0, 1.0), coin.SbVec3f(*direction)))
         group.addChild(orient)
+        # Draw the ring as an ordinary sibling. SoRotateDiscDragger does not
+        # render its rotator part here -- not even the stock geometry -- so
+        # relying on the part for visibility left two of the three rings
+        # invisible. The dragger still gets a matching copy at the same radius,
+        # which is what a click actually hits.
+        visible = self._ring(colour, False)
+        group.addChild(visible)
         dragger = coin.SoRotateDiscDragger()
         dragger.setPart("rotator", self._ring(colour, False))
         dragger.setPart("rotatorActive", self._ring(colour, True))
         group.addChild(dragger)
         self._rotators.append((dragger, direction))
-        self._nodes.extend([group, orient, dragger])
+        self._nodes.extend([group, orient, dragger, visible])
         return group
+
+    def _axis_scaler(self, direction, colour):
+        """A knob whose drag scales along one axis."""
+        group = coin.SoSeparator()
+        orient = coin.SoRotation()
+        # SoScale1Dragger scales along its own local X; aim that here.
+        orient.rotation.setValue(
+            coin.SbRotation(coin.SbVec3f(1.0, 0.0, 0.0), coin.SbVec3f(*direction)))
+        group.addChild(orient)
+        visible = self._scale_knob(colour, False)
+        group.addChild(visible)
+        dragger = coin.SoScale1Dragger()
+        dragger.setPart("scaler", self._scale_knob(colour, False))
+        dragger.setPart("scalerActive", self._scale_knob(colour, True))
+        group.addChild(dragger)
+        self._scalers.append((dragger, direction))
+        self._nodes.extend([group, orient, dragger, visible])
+        return group
+
+    @staticmethod
+    def _scale_knob(colour, active):
+        """A cube sitting just beyond the arrow tip."""
+        node = coin.SoSeparator()
+        material = coin.SoMaterial()
+        material.diffuseColor.setValue(*colour)
+        if active:
+            material.emissiveColor.setValue(*colour)
+        node.addChild(material)
+        offset = coin.SoTranslation()
+        offset.translation.setValue(1.75, 0.0, 0.0)
+        node.addChild(offset)
+        knob = coin.SoCube()
+        knob.width = knob.height = knob.depth = 0.17
+        node.addChild(knob)
+        return node
 
     @staticmethod
     def _arrow(colour, active):
@@ -348,7 +394,8 @@ class TransformController:
         base = coin.SoBaseColor()
         base.rgb.setValue(*tint)
         node.addChild(base)
-        inner, outer = (0.90, 1.18) if active else (0.92, 1.16)
+        # Thin enough to read as a ring, wide enough to be an easy pick target.
+        inner, outer = (1.00, 1.15) if active else (1.03, 1.12)
         points = []
         for index in range(RING_SEGMENTS + 1):
             angle = 2 * pi * index / RING_SEGMENTS
@@ -398,7 +445,10 @@ class TransformController:
                        for dragger, _direction in self._translators]
             angles = [self._disc_angle(dragger)
                       for dragger, _direction in self._rotators]
-            sample = tuple(round(value, 7) for value in offsets + angles)
+            # SoScale1Dragger reports its factor on its own local X.
+            factors = [dragger.scaleFactor.getValue().getValue()[0]
+                       for dragger, _direction in self._scalers]
+            sample = tuple(round(value, 7) for value in offsets + angles + factors)
             if sample == self._last_sample:
                 # Polling runs continuously; only write when something moved.
                 return
@@ -419,10 +469,20 @@ class TransformController:
                     setattr(target.obj, target.property_name, target.initial.multiply(delta))
                 else:
                     setattr(target.obj, target.property_name, delta.multiply(target.initial))
-            # Scale is not reachable from this gizmo yet; it needs its own
-            # SoScale1Dragger per axis. _apply_scale stays for that.
-            # No recompute here either: it would run many times a second and is
-            # very slow on large models. finish() recomputes once.
+            # _apply_scale enforces the rule that only objects with a
+            # writable Scale/ScaleFactor may be scaled; a Placement cannot
+            # represent one, so parametric solids are refused rather than
+            # silently mangled.
+            if any(abs(f - 1.0) > EPSILON for f in factors):
+                scale_by = [1.0, 1.0, 1.0]
+                for factor, (_dragger, direction) in zip(factors, self._scalers):
+                    for index in range(3):
+                        if direction[index]:
+                            scale_by[index] = factor
+                for target in self._targets:
+                    self._apply_scale(target, tuple(scale_by))
+            # No recompute here: it would run many times a second and is very
+            # slow on large models. finish() recomputes once.
             self._changed = True
         except Exception as error:
             App.Console.PrintError(f"Transform Handle: transform failed: {error}\n")

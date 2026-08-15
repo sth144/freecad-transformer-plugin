@@ -24,13 +24,17 @@ This is a deliberately conservative first pass. It is intended for FreeCAD
   never edited.
 * Multi-selection: targets are deduplicated and transformed about one shared
   bounding-box centre.
-* Each arrow and ring is its own Coin dragger, so a drag is constrained to the
-  axis you grabbed: `SoTranslate1Dragger` per axis for the arrows,
-  `SoRotateDiscDragger` per axis for the rings.
-* Scaling is not currently reachable from the handle. It needs an
-  `SoScale1Dragger` per axis; `_apply_scale` is still there for that. The rule
-  it enforces stands: only objects exposing a writable `Scale`/`ScaleFactor`
-  can be scaled, and the addon never bakes a scale into a Shape or edits a
+* Each handle is its own Coin dragger, so a drag is constrained to the axis you
+  grabbed: `SoTranslate1Dragger` for the arrows, `SoRotateDiscDragger` for the
+  rings, `SoScale1Dragger` for the cube knobs beyond each arrow tip.
+* The rings and knobs are drawn as ordinary sibling geometry, with a matching
+  copy handed to each dragger purely as a pick target. `SoRotateDiscDragger`
+  does not render its `rotator` part here -- not even its own stock geometry --
+  so relying on the part for visibility left two of the three rings invisible.
+* Scaling only applies to objects exposing a writable `Scale`/`ScaleFactor`,
+  such as `App::Link`. Placement-only and parametric objects keep their valid
+  placement and report that scale is not representable: a FreeCAD `Placement`
+  cannot hold one, and the addon never bakes a scale into a Shape or edits a
   feature's dimensions behind the user's back.
 
 That last rule is important: transform matrices can represent scale, but a
